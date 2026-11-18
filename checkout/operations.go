@@ -1233,7 +1233,7 @@ func (r *Registry) freezeLocked(ctx context.Context, h *checkoutRecord, label st
 		stack = append([]string{layerID}, stack...)
 	}
 	stackParent := deref(parent)
-	s := &snapRecord{meta: snapMeta{ID: id, Checkout: h.meta.Name, Dir: h.meta.Dir, Parent: copyString(parent), Label: label, Created: time.Now().UTC()}, base: h.base, stack: stack, layer: layerID, stackParent: stackParent, git: gitTree, done: make(chan struct{})}
+	s := &snapRecord{meta: snapMeta{ID: id, Checkout: h.meta.Name, Dir: h.meta.Dir, Life: h.meta.Life, Parent: copyString(parent), Label: label, Created: time.Now().UTC()}, base: h.base, stack: stack, layer: layerID, stackParent: stackParent, git: gitTree, done: make(chan struct{})}
 	r.snapshots[id] = s
 	r.lineage[id] = s
 	if layerID != "" {
@@ -1454,7 +1454,7 @@ func (r *Registry) remove(ctx context.Context, name string, picked time.Time, st
 		r.intents[name] = diskIntent{Op: "removing", Checkout: name, Dir: h.meta.Dir, Layer: h.meta.Base}
 		r.mu.Unlock()
 	} else if !stickySnapshots {
-		err = r.dropCheckoutSnapshots(name)
+		err = r.dropCheckoutSnapshots(h.meta)
 	}
 	removeErr := r.removeCheckoutFiles(h.meta.dir())
 	r.mu.Lock()
@@ -1473,8 +1473,11 @@ func (r *Registry) remove(ctx context.Context, name string, picked time.Time, st
 	return true, nil
 }
 
-// dropCheckoutSnapshots keeps snapshots still in another checkout or snapshot's ancestry.
-func (r *Registry) dropCheckoutSnapshots(name string) error {
+// dropCheckoutSnapshots drops the snapshots of the removed checkout m, keeping
+// those still in another checkout or snapshot's ancestry. A snapshot of an
+// earlier checkout of the same name, one removed with its snapshots retained,
+// is another's.
+func (r *Registry) dropCheckoutSnapshots(m checkoutMeta) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -1492,15 +1495,18 @@ func (r *Registry) dropCheckoutSnapshots(name string) error {
 	for _, h := range r.checkouts {
 		visit(checkoutSnapshot(h.meta))
 	}
+	own := func(s *snapRecord) bool {
+		return s.meta.Checkout == m.Name && (s.meta.Life == 0 || s.meta.Life == m.Life)
+	}
 	for id, s := range r.snapshots {
-		if s.meta.Checkout != name {
+		if !own(s) {
 			visit(id)
 		}
 	}
 
 	var ids []string
 	for id, s := range r.snapshots {
-		if s.meta.Checkout == name && !used[id] {
+		if own(s) && !used[id] {
 			ids = append(ids, id)
 		}
 	}

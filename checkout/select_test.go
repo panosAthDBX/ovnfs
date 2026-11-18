@@ -186,6 +186,43 @@ func TestRemovalKeepsSharedSnapshots(t *testing.T) {
 	}
 }
 
+// TestRemovalKeepsEarlierCheckoutsSnapshots keeps a snapshot retained by a
+// sticky removal when a later checkout of the same name is removed (#80).
+func TestRemovalKeepsEarlierCheckoutsSnapshots(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	dir := folder(t, map[string]string{"a": "base"})
+	f.newCheckout(dir, "probe")
+	f.put("probe", "a", "kept")
+	kept, err := f.reg.Snap(ctx, api.SnapArgs{Checkout: "probe", Wait: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.reg.Rm(ctx, api.RmArgs{Checkout: "probe", StickySnapshots: true}); err != nil {
+		t.Fatal(err)
+	}
+	f.reg.Close()
+	f.open()
+	f.newCheckout(dir, "probe")
+	f.put("probe", "a", "later")
+	if _, err := f.reg.Snap(ctx, api.SnapArgs{Checkout: "probe", Wait: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.reg.Rm(ctx, api.RmArgs{Checkout: "probe"}); err != nil {
+		t.Fatal(err)
+	}
+	snapshots := f.ls().Snapshots
+	if len(snapshots) != 1 || snapshots[0].ID != kept.Snapshot.ID {
+		t.Fatalf("snapshots after removing the later checkout = %+v, want only %s", snapshots, kept.Snapshot.ID)
+	}
+	if _, err := f.reg.New(ctx, api.NewArgs{Name: "restored", Snapshot: kept.Snapshot.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.read("restored", "a"); got != "kept" {
+		t.Fatalf("restored content = %q", got)
+	}
+}
+
 // isCode reports whether err is a registry error with code.
 func isCode(err error, code string) bool {
 	e, ok := errors.AsType[*Error](err)
