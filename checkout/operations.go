@@ -1454,7 +1454,7 @@ func (r *Registry) remove(ctx context.Context, name string, picked time.Time, st
 		r.intents[name] = diskIntent{Op: "removing", Checkout: name, Dir: h.meta.Dir, Layer: h.meta.Base}
 		r.mu.Unlock()
 	} else if !stickySnapshots {
-		err = r.dropCheckoutSnapshots(h.meta)
+		err = r.dropCheckoutSnapshots(name, h.meta.Life)
 	}
 	removeErr := r.removeCheckoutFiles(h.meta.dir())
 	r.mu.Lock()
@@ -1473,11 +1473,11 @@ func (r *Registry) remove(ctx context.Context, name string, picked time.Time, st
 	return true, nil
 }
 
-// dropCheckoutSnapshots drops the snapshots of the removed checkout m, keeping
-// those still in another checkout or snapshot's ancestry. A snapshot of an
-// earlier checkout of the same name, one removed with its snapshots retained,
-// is another's.
-func (r *Registry) dropCheckoutSnapshots(m checkoutMeta) error {
+// dropCheckoutSnapshots drops the snapshots of the removed checkout name of
+// life (checkoutMeta.Life), keeping those still in another checkout or
+// snapshot's ancestry. A snapshot of an earlier checkout of the same name, one
+// removed with its snapshots retained, is another's.
+func (r *Registry) dropCheckoutSnapshots(name string, life uint32) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -1496,7 +1496,7 @@ func (r *Registry) dropCheckoutSnapshots(m checkoutMeta) error {
 		visit(checkoutSnapshot(h.meta))
 	}
 	own := func(s *snapRecord) bool {
-		return s.meta.Checkout == m.Name && (s.meta.Life == 0 || s.meta.Life == m.Life)
+		return s.meta.Checkout == name && (s.meta.Life == 0 || s.meta.Life == life)
 	}
 	for id, s := range r.snapshots {
 		if !own(s) {

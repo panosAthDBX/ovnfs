@@ -223,6 +223,35 @@ func TestRemovalKeepsEarlierCheckoutsSnapshots(t *testing.T) {
 	}
 }
 
+// TestRemovalDropsSnapshotsWithoutLife drops a checkout's snapshots written
+// before snapshots recorded their checkout's life, as removal always did.
+func TestRemovalDropsSnapshotsWithoutLife(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	f.newCheckout(folder(t, map[string]string{"a": "base"}), "app")
+	f.put("app", "a", "changed")
+	if _, err := f.reg.Snap(ctx, api.SnapArgs{Checkout: "app", Wait: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.reg.Close(); err != nil {
+		t.Fatal(err)
+	}
+	d := readDisk(t, f.state)
+	for i := range d.Snapshots {
+		d.Snapshots[i].Life = 0
+	}
+	if err := writeState(f.state, d); err != nil {
+		t.Fatal(err)
+	}
+	f.open()
+	if err := f.reg.Rm(ctx, api.RmArgs{Checkout: "app"}); err != nil {
+		t.Fatal(err)
+	}
+	if snapshots := f.ls().Snapshots; len(snapshots) != 0 {
+		t.Fatalf("snapshots after removal = %+v", snapshots)
+	}
+}
+
 // isCode reports whether err is a registry error with code.
 func isCode(err error, code string) bool {
 	e, ok := errors.AsType[*Error](err)
